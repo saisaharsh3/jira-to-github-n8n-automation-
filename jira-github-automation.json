@@ -1,0 +1,396 @@
+{
+  "name": "Jira to GitHub AI Automation - Gemini",
+  "nodes": [
+    {
+      "parameters": {
+        "events": [
+          "jira:issue_created"
+        ],
+        "additionalFields": {}
+      },
+      "id": "758c47c6-3942-4d2f-bc51-26758a0ad1b5",
+      "name": "Jira Issue Created",
+      "type": "n8n-nodes-base.jiraTrigger",
+      "typeVersion": 1,
+      "position": [0, 0],
+      "webhookId": "auto-generated",
+      "credentials": {
+        "jiraSoftwareCloudApi": {
+          "id": "YOUR_JIRA_CREDENTIAL_ID",
+          "name": "Jira SW Cloud account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract Jira issue data\nconst issue = $input.item.json.issue;\nconst issueKey = issue.key;\nconst summary = issue.fields.summary || 'Bug fix';\nconst description = issue.fields.description || 'No description provided';\n\n// ==== CONFIGURE YOUR GITHUB SETTINGS HERE ====\nconst githubOrg = \"YOUR_GITHUB_USERNAME\";  // YOUR GITHUB USERNAME\nconst githubRepo = \"YOUR_REPO_NAME\";        // YOUR REPOSITORY NAME  \nconst filePath = \"app/main.py\";             // FILE TO FIX\n// ============================================\n\nconst branchName = `fix/${issueKey.toLowerCase()}`;\n\nreturn {\n  issue_key: issueKey,\n  summary: summary,\n  description: description,\n  github_org: githubOrg,\n  github_repo: githubRepo,\n  file_path: filePath,\n  branch_name: branchName\n};"
+      },
+      "id": "3c3bff79-e267-4dd2-b0c9-db1b734f71d3",
+      "name": "Extract Issue Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [208, 0]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/YOUR_GITHUB_USERNAME/YOUR_REPO_NAME/contents/app/main.py",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "feefce06-fb51-4b6d-9cd8-a645504a74c8",
+      "name": "Get File from GitHub",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [432, 0],
+      "credentials": {
+        "githubApi": {
+          "id": "YOUR_GITHUB_CREDENTIAL_ID",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Decode the file from GitHub\nconst githubResponse = $input.item.json;\nconst previousData = $('Extract Issue Data').item.json;\n\n// Decode base64 content\nconst base64Content = githubResponse.content;\nconst decodedCode = Buffer.from(base64Content, 'base64').toString('utf-8');\n\nreturn {\n  issue_key: previousData.issue_key,\n  summary: previousData.summary,\n  description: previousData.description,\n  github_org: previousData.github_org,\n  github_repo: previousData.github_repo,\n  file_path: previousData.file_path,\n  branch_name: previousData.branch_name,\n  original_code: decodedCode,\n  file_sha: githubResponse.sha,\n  download_url: githubResponse.download_url\n};"
+      },
+      "id": "54b8c5cd-89b2-4104-b807-04e7cc62e455",
+      "name": "Decode File",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [656, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const retry = $json.retry ?? 0;\n\nconst prompt = `\nIMPORTANT:\nThis is an automated retry attempt #${retry}.\n\nPrevious response was INVALID and REJECTED.\n\nSTRICT REQUIREMENTS (NON-NEGOTIABLE):\n- Output ONLY valid Python source code\n- Start on line 1 with Python code\n- End with Python code\n- NO explanations\n- NO markdown\n- NO headings\n- NO comments\n- NO blank lines before code\n- NO text before or after code\n\nFILE: ${$json.file_path}\n\nCURRENT CODE:\n${$json.original_code}\n\nBUG:\n${$json.description}\n\nReturn the corrected Python code now.\n`;\n\nreturn {\n  ...$json,\n  ai_prompt: prompt\n};\n"
+      },
+      "id": "075d3441-77bd-4792-a33e-6aac4a0f0014",
+      "name": "Build AI Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"retry\": {{ $json.retry ?? 0 }}\n}\n",
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1088, 0],
+      "id": "9c9a25be-8130-44ce-93a7-642c2621f12a",
+      "name": "Retry Counter"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "YOUR_GEMINI_API_KEY"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "body": "={{ JSON.stringify({ \"contents\": [{ \"parts\": [{ \"text\": $json.ai_prompt }] }], \"generationConfig\": { \"temperature\": 0.1, \"maxOutputTokens\": 2048 } }) }}",
+        "options": {}
+      },
+      "id": "76dd26d2-6c94-434a-8434-27fb5808984c",
+      "name": "Call Google Gemini",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1296, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $('Call Google Gemini').item.json.candidates[0].content.parts[0].text;\n\n// Strip markdown code fences\nconst cleaned = raw\n  .replace(/^```python\\s*/i, '')\n  .replace(/^```\\s*/i, '')\n  .replace(/```\\s*$/i, '')\n  .trim();\n\nreturn [{ json: { fixed_code: cleaned } }];"
+      },
+      "id": "9c51da61-bdcc-484f-9bda-77017e6cf143",
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1520, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const retry = $json.retry ?? 0;\n\nif (retry >= 1) {\n  throw new Error(\"Retry limit reached. Aborting.\");\n}\n\nreturn {\n  issue_key: $json.issue_key,\n  summary: $json.summary,\n  description: $json.description,\n  github_org: $json.github_org,\n  github_repo: $json.github_repo,\n  file_path: $json.file_path,\n  branch_name: $json.branch_name,\n  file_sha: $json.file_sha,\n  original_code: $json.original_code,\n  retry: retry + 1\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1728, 0],
+      "id": "eeebd9f9-c486-4cf4-871e-f532d74c7f4a",
+      "name": "Diff Size Guardrail"
+    },
+    {
+      "parameters": {
+        "jsCode": "let code = $('Parse AI Response').item.json.fixed_code;\n\n// Remove ```python ``` or ``` wrappers\ncode = code\n  .replace(/```python/g, '')\n  .replace(/```/g, '')\n  .trim();\n\nreturn {\n  ...$json,\n  fixed_code: code\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1936, 0],
+      "id": "be51d6be-ba3b-4b26-be6b-b095776ad27c",
+      "name": "Cleanup Code (JS)"
+    },
+    {
+      "parameters": {
+        "jsCode": "const code = $('Parse AI Response').item.json.fixed_code;\n\nif (!code) {\n  throw new Error(\"fixed_code missing\");\n}\n\ntry {\n  // Very cheap sanity checks\n  if (code.includes(\"You are\") || code.includes(\"Prompt\")) {\n    throw new Error(\"AI returned explanation\");\n  }\n\n  // Python-style heuristic\n  if (!/^\\s*(print|def|class|import|from)/m.test(code)) {\n    throw new Error(\"Does not look like Python\");\n  }\n\n} catch (e) {\n  throw new Error(\"Invalid Python output: \" + e.message);\n}\n\nreturn $json;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2144, 0],
+      "id": "628dfa3c-7b22-4590-bee9-4e2593e54926",
+      "name": "Python Syntax Guard"
+    },
+    {
+      "parameters": {
+        "jsCode": "return {\n  fixed_code_base64: Buffer\n    .from($json.fixed_code, 'utf8')\n    .toString('base64')\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2368, 0],
+      "id": "6e228c7d-c291-4a64-9f95-f0cc0ebc74f6",
+      "name": "Encode Fixed Code"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/YOUR_GITHUB_USERNAME/YOUR_REPO_NAME/git/refs/heads/main",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0afab0ac-4b91-4508-9330-12210fcfc51f",
+      "name": "Get Main Branch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2576, 0],
+      "credentials": {
+        "githubApi": {
+          "id": "YOUR_GITHUB_CREDENTIAL_ID",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.github.com/repos/YOUR_GITHUB_USERNAME/YOUR_REPO_NAME/git/refs",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"ref\": \"refs/heads/{{ $('Retry Counter').item.json.branch_name }}\",\n  \"sha\": \"{{ $('Get Main Branch').item.json.object.sha }}\"\n}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "44c793fb-ad7c-410b-8dab-7214fca2065e",
+      "name": "Create Branch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2800, 0],
+      "credentials": {
+        "githubApi": {
+          "id": "YOUR_GITHUB_CREDENTIAL_ID",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const fixedCode = $('Parse AI Response').item.json.fixed_code;\n\nif (!fixedCode) {\n  throw new Error(\"fixed_code missing. Aborting.\");\n}\n\n// Strip markdown code fences if Gemini wrapped response in them\nconst cleanedCode = fixedCode\n  .replace(/^```python\\s*/i, '')\n  .replace(/^```\\s*/i, '')\n  .replace(/```\\s*$/i, '')\n  .trim();\n\n// Relaxed Python check - covers more valid Python patterns\nconst looksLikePython =\n  /^\\s*(from|import|def|class|\\w+\\s*=|print\\s*\\(|#|if\\s|for\\s|while\\s|return\\s|try\\s*:|raise\\s|with\\s)/m.test(cleanedCode);\n\nif (!looksLikePython) {\n  throw new Error(\"AI output is not Python source code. Aborting.\");\n}\n\n// Return cleaned code so downstream nodes get the stripped version\nreturn [{ json: { ...$json, fixed_code: cleanedCode } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3008, 0],
+      "id": "4dcc2c44-b6ba-45b7-88d7-e09ca9cd75c9",
+      "name": "Code (JS)"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://api.github.com/repos/YOUR_GITHUB_USERNAME/YOUR_REPO_NAME/contents/app/main.py",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"message\": \"{{ $('Retry Counter').item.json.issue_key }}: fix typo in main.py\",\n  \"content\": \"{{ $('Encode Fixed Code').item.json.fixed_code_base64 }}\",\n  \"sha\": \"{{ $('Get File from GitHub').item.json.sha }}\",\n  \"branch\": \"{{ $('Retry Counter').item.json.branch_name }}\"\n}",
+        "options": {}
+      },
+      "id": "d3f9db35-b2d6-48ed-bed0-9c9f3ae0c425",
+      "name": "Commit Code",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3216, 0],
+      "credentials": {
+        "githubApi": {
+          "id": "YOUR_GITHUB_CREDENTIAL_ID",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.github.com/repos/YOUR_GITHUB_USERNAME/YOUR_REPO_NAME/pulls",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"title\": \"{{ $('Retry Counter').item.json.issue_key }}: {{ $('Retry Counter').item.json.summary }}\",\n  \"body\": \"Automated fix for {{ $('Retry Counter').item.json.issue_key }}\\n\\n{{ $('Retry Counter').item.json.description }}\",\n  \"head\": \"{{ $('Retry Counter').item.json.branch_name }}\",\n  \"base\": \"main\"\n}",
+        "options": {}
+      },
+      "id": "4f5b1e12-d405-4818-9380-5988d8b27162",
+      "name": "Create PR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3440, 0],
+      "credentials": {
+        "githubApi": {
+          "id": "YOUR_GITHUB_CREDENTIAL_ID",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "issueKey": "={{ $('Retry Counter').item.json.issue_key }}",
+        "updateFields": {}
+      },
+      "id": "c08949f6-c385-4897-8ec9-a81bbdb43dcc",
+      "name": "Update Jira",
+      "type": "n8n-nodes-base.jira",
+      "typeVersion": 1,
+      "position": [3664, 0],
+      "credentials": {
+        "jiraSoftwareCloudApi": {
+          "id": "YOUR_JIRA_CREDENTIAL_ID",
+          "name": "Jira SW Cloud account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Jira Issue Created": {
+      "main": [[{ "node": "Extract Issue Data", "type": "main", "index": 0 }]]
+    },
+    "Extract Issue Data": {
+      "main": [[{ "node": "Get File from GitHub", "type": "main", "index": 0 }]]
+    },
+    "Get File from GitHub": {
+      "main": [[{ "node": "Decode File", "type": "main", "index": 0 }]]
+    },
+    "Decode File": {
+      "main": [[{ "node": "Build AI Prompt", "type": "main", "index": 0 }]]
+    },
+    "Build AI Prompt": {
+      "main": [[{ "node": "Retry Counter", "type": "main", "index": 0 }]]
+    },
+    "Retry Counter": {
+      "main": [[{ "node": "Call Google Gemini", "type": "main", "index": 0 }]]
+    },
+    "Call Google Gemini": {
+      "main": [[{ "node": "Parse AI Response", "type": "main", "index": 0 }]]
+    },
+    "Parse AI Response": {
+      "main": [[{ "node": "Diff Size Guardrail", "type": "main", "index": 0 }]]
+    },
+    "Diff Size Guardrail": {
+      "main": [[{ "node": "Cleanup Code (JS)", "type": "main", "index": 0 }]]
+    },
+    "Cleanup Code (JS)": {
+      "main": [[{ "node": "Python Syntax Guard", "type": "main", "index": 0 }]]
+    },
+    "Python Syntax Guard": {
+      "main": [[{ "node": "Encode Fixed Code", "type": "main", "index": 0 }]]
+    },
+    "Encode Fixed Code": {
+      "main": [[{ "node": "Get Main Branch", "type": "main", "index": 0 }]]
+    },
+    "Get Main Branch": {
+      "main": [[{ "node": "Create Branch", "type": "main", "index": 0 }]]
+    },
+    "Create Branch": {
+      "main": [[{ "node": "Code (JS)", "type": "main", "index": 0 }]]
+    },
+    "Code (JS)": {
+      "main": [[{ "node": "Commit Code", "type": "main", "index": 0 }]]
+    },
+    "Commit Code": {
+      "main": [[{ "node": "Create PR", "type": "main", "index": 0 }]]
+    },
+    "Create PR": {
+      "main": [[{ "node": "Update Jira", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}
