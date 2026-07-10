@@ -1,4 +1,5 @@
 # Jira-GitHub-n8n_Autonomous-Agent
+<img width="1728" height="123" alt="image" src="https://github.com/user-attachments/assets/14d5a18a-7feb-4d3f-9a76-fbad79428daf" />
 
 ## Overview
 This project is a streamlined, autonomous n8n workflow that bridges issue tracking (Jira) and version control (GitHub). It acts as an AI-driven software engineer that automatically responds to newly created Jira bug tickets, fetches the relevant source code from your GitHub repository, writes Python code fixes via the Google Gemini API, pushes the revised commit, and opens a Pull Request (PR)—all without human intervention.
